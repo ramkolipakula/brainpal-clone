@@ -1,0 +1,22 @@
+{
+  "source_path": "PRD.md",
+  "type": "PRD",
+  "confidence": "high",
+  "manifest_override": false,
+  "title": "PRD: BrainPal Android Application Reconstruction",
+  "summary": "Reconstruct the BrainPal application from original APK into a clean-room native Android application using Kotlin and Jetpack Compose for smart screen time interventions, app usage monitoring, meme roasts, and Material 3 UX.",
+  "scope": [
+    "BrainPal Android Application",
+    "Screen Time Intervention",
+    "Usage Monitoring",
+    "Meme/Roast Interventions",
+    "Healthy Session Limits",
+    "Material 3 UI",
+    "APK Packaging & Delivery"
+  ],
+  "cross_refs": [],
+  "locked": false,
+  "precedence": null,
+  "notes": "Matches PRD convention. Contains 8 major functional tasks covering environment setup, APK static analysis, architecture planning, screen reconstruction, wellbeing background logic, unit/integration testing, defect remediation, and final release packaging."
+}
+
