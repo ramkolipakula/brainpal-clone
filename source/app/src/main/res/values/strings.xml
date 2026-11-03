@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">BrainPal</string>
+    <string name="channel_name">BrainPal Wellbeing Monitor</string>
+    <string name="channel_desc">Monitors screen time and active focus intervals</string>
+    <string name="accessibility_service_label">BrainPal Reel &amp; Scroll Counter</string>
+    <string name="accessibility_service_description">Detects short-form video feed scrolling in supported apps to help curb dopamine addiction.</string>
+</resources>
+

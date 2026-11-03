@@ -1,0 +1,15 @@
+# 03 - Feature Matrix: BrainPal
+
+| Feature ID | Feature Name | Classification | Evidence | Implementation Approach | Test Strategy |
+|---|---|---|---|---|---|
+| **FEAT-01** | Multi-Language Roast Meme Engine | **CONFIRMED** | `assets/roast_gifs.json` contains 13 localized meme pools (Hindi, English, Telugu, Tamil, Indonesian, etc.) with 500+ meme URLs & captions. | Build localized meme selector module and image/WebP loader. | Unit test random selection, language filtering, fallback mechanisms. |
+| **FEAT-02** | Usage Access & Screen Time Monitoring | **CONFIRMED** | `android.permission.PACKAGE_USAGE_STATS`, `HourlyReelsSplit`, `DailyReelsAppSplit`. | Query Android `UsageStatsManager` to aggregate daily foreground usage. | Unit test query intervals, date boundaries, and aggregation algorithms. |
+| **FEAT-03** | App Blocking & Limit Enforcement | **CONFIRMED** | `BlockReelsOverlayActivity`, `UserBlockingConfig`. | Check running app against user limits; launch overlay activity if quota reached. | Unit test quota threshold comparison and emergency bypass timer. |
+| **FEAT-04** | Floating Bubble Reel Counter | **CONFIRMED** | `ReelsCounterFloatingService`, `bubble.xml`, `SYSTEM_ALERT_WINDOW`. | Service creating `WindowManager` overlay view displaying real-time counter. | Test overlay lifecycle, permission checks, and touch drag handling. |
+| **FEAT-05** | Reel & Short-Form Video Tracking | **CONFIRMED** | `ReelsAccessibilityService`, `ReelsScrollEvent`. | Accessibility service monitoring `TYPE_VIEW_SCROLLED` in short-form video containers. | Test accessibility service configuration, event parsing, and throttling. |
+| **FEAT-06** | Interactive Permission Onboarding | **CONFIRMED** | `PermissionStepsOverlayActivity`, video assets in `assets/permission_videos/`. | Multi-step Compose flow with visual indicators and direct deep links to settings. | UI test state progression as permissions change. |
+| **FEAT-07** | Analytics & Usage Insights | **CONFIRMED** | `BrainRotRoomDatabase`, `HourStats`, `DayStats`. | Room database storing daily scroll events and usage history with Material 3 chart components. | Unit test Room DAOs, queries, and statistics aggregation. |
+| **FEAT-08** | Buddy Mascot Emotional States | **CONFIRMED** | Mascot assets `br_brain_standing_1.webp` through `5.webp` in `res/raw`. | State-driven mascot display reacting to user's daily detox score. | Unit test score-to-mood mapping function. |
+| **FEAT-09** | Cloud Sync & Social Duels | **PARTIALLY CONFIRMED** | API endpoints `BrainRotApi`, `InviteApi`. Original backend `regainapp.ai` is a private proprietary server. | Local-first architecture with mockable API repository and offline persistence; no hardcoded false credentials. | Test local persistence and error handling when remote sync is offline. |
+| **FEAT-10** | In-App Subscriptions & Billing | **OUT OF SCOPE** | Razorpay / RevenueCat / Play Billing properties. | Per master instructions: Do not bypass payment verification or reuse private publisher credentials. Provide clean open access to wellbeing features in rebuild. | Verify no billing crashes or entitlement bypass logic. |
+

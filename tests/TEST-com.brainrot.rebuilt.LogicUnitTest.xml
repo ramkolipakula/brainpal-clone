@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.brainrot.rebuilt.LogicUnitTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-11-02T09:18:37" hostname="DESKTOP-2T1NFSR" time="0.042">
+  <properties/>
+  <testcase name="testRoastMemeFallback" classname="com.brainrot.rebuilt.LogicUnitTest" time="0.041"/>
+  <testcase name="testEmergencyPassDeduction" classname="com.brainrot.rebuilt.LogicUnitTest" time="0.001"/>
+  <testcase name="testSnoozeLogic" classname="com.brainrot.rebuilt.LogicUnitTest" time="0.0"/>
+  <testcase name="testBuddyMoodCalculations" classname="com.brainrot.rebuilt.LogicUnitTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

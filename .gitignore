@@ -1,0 +1,78 @@
+# ============================================================
+# APK-Rebuild Project .gitignore
+# ============================================================
+
+# ─── Android / Gradle Build Outputs ────────────────────────
+source/.gradle/
+source/app/build/
+source/build/
+source/local.properties
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# ─── Android Signing Keystores ─────────────────────────────
+*.jks
+*.keystore
+
+# ─── Gradle Wrapper (optional – keep if you want reproducible builds) ──
+# source/gradle/wrapper/gradle-wrapper.jar
+
+# ─── IntelliJ / Android Studio IDE Files ───────────────────
+.idea/
+*.iml
+*.iws
+*.ipr
+.DS_Store
+Thumbs.db
+out/
+
+# ─── Original APK & Extracted Contents ─────────────────────
+# The original APK and its extracted/decompiled contents are
+# large binary/generated artifacts – not source-controlled.
+original/BrainPal.apk
+original/extracted/
+
+# ─── Delivery Artifacts ────────────────────────────────────
+# Built APKs in the delivery folder are regenerated from source.
+delivery/
+
+# ─── Logs ──────────────────────────────────────────────────
+logs/
+*.log
+progress.txt
+
+# ─── OS & Editor Noise ─────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+*~
+*.swp
+*.swo
+
+# ─── Python Cache (from original/*.py scripts) ─────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ─── Kotlin / Java Compiled Output ─────────────────────────
+*.class
+
+# ─── ProGuard / R8 Mapping Files (generated) ───────────────
+*.map
+mapping.txt
+seeds.txt
+usage.txt
+
+# ─── Test / Coverage Reports ───────────────────────────────
+tests/results/
+tests/coverage/
+
+# ─── Temporary / Scratch Files ─────────────────────────────
+*.tmp
+*.temp
+*.bak
+*.orig
+
