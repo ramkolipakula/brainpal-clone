@@ -27,6 +27,8 @@ import com.brainrot.rebuilt.domain.DetectionResult
 import com.brainrot.rebuilt.domain.MascotStageCalculator
 import com.brainrot.rebuilt.domain.ReelDetectionEngine
 import com.brainrot.rebuilt.domain.ScrollEvaluationContext
+import com.brainrot.rebuilt.domain.diagnostic.DiagnosticEventRecord
+import com.brainrot.rebuilt.domain.diagnostic.ReelDiagnosticLogger
 import com.brainrot.rebuilt.domain.model.MascotStage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -41,7 +43,7 @@ class ReelsAccessibilityService : AccessibilityService() {
     private var badgeParams: WindowManager.LayoutParams? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private val reelDetectionEngine = ReelDetectionEngine(debounceWindowMs = 600L)
+    private val reelDetectionEngine = ReelDetectionEngine(debounceWindowMs = 350L)
     private var currentActivePackage: String? = null
 
     companion object {
@@ -57,6 +59,9 @@ class ReelsAccessibilityService : AccessibilityService() {
         windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
         Log.i(TAG, "ReelsAccessibilityService connected. WindowManager ready: ${windowManager != null}")
 
+        // Initialize diagnostic event logging (Finding 2)
+        ReelDiagnosticLogger.initialize(this)
+
         val app = BrainPalApp.instance
 
         // Observe reactive StateFlows for live synchronization
@@ -66,7 +71,7 @@ class ReelsAccessibilityService : AccessibilityService() {
                     hideFloatingBadge()
                 } else {
                     currentActivePackage?.let { pkg ->
-                        if (app.prefsRepository.isAppBlocked(pkg)) {
+                        if (app.prefsRepository.isAppReelMonitored(pkg)) {
                             showOrUpdateFloatingBadge(pkg)
                         }
                     }
@@ -112,12 +117,12 @@ class ReelsAccessibilityService : AccessibilityService() {
             }
         }
 
-        // Check if a blocked app is already open upon service connection
+        // Check if a monitored app is already open upon service connection
         try {
             val activeRootPkg = try { rootInActiveWindow?.packageName?.toString() } catch (e: Exception) { null }
             val currentPkg = activeRootPkg ?: app.usageRepository.getForegroundApp()
             Log.d(TAG, "onServiceConnected: detected active pkg: $currentPkg")
-            if (currentPkg != null && app.prefsRepository.isAppBlocked(currentPkg) && app.prefsRepository.isFloatingBubbleEnabled()) {
+            if (currentPkg != null && app.prefsRepository.isAppReelMonitored(currentPkg) && app.prefsRepository.isFloatingBubbleEnabled()) {
                 currentActivePackage = currentPkg
                 mainHandler.post { showOrUpdateFloatingBadge(currentPkg) }
             }
@@ -139,7 +144,7 @@ class ReelsAccessibilityService : AccessibilityService() {
             }
 
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
-                if (app.prefsRepository.isAppBlocked(pkg) && app.prefsRepository.isFloatingBubbleEnabled()) {
+                if (app.prefsRepository.isAppReelMonitored(pkg) && app.prefsRepository.isFloatingBubbleEnabled()) {
                     currentActivePackage = pkg
                     if (floatingBadgeView == null || !floatingBadgeView!!.isAttachedToWindow || floatingBadgeView?.visibility != View.VISIBLE) {
                         mainHandler.post { showOrUpdateFloatingBadge(pkg) }
@@ -148,13 +153,13 @@ class ReelsAccessibilityService : AccessibilityService() {
             }
 
             AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
-                if (app.prefsRepository.isAppBlocked(pkg)) {
+                // Finding 1: Check independent reel monitor configuration
+                if (app.prefsRepository.isAppReelMonitored(pkg)) {
                     currentActivePackage = pkg
                     if (app.prefsRepository.isFloatingBubbleEnabled()) {
                         mainHandler.post { showOrUpdateFloatingBadge(pkg) }
                     }
 
-                    // Phase 4: Strict Event Classification and Filtering
                     val deltaX = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) event.scrollDeltaX else 0
                     val deltaY = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) event.scrollDeltaY else 0
 
@@ -166,7 +171,10 @@ class ReelsAccessibilityService : AccessibilityService() {
                         p
                     } catch (e: Exception) { null }
 
-                    val hierarchyKeywords = extractHierarchyKeywords(root)
+                    val inspection = inspectHierarchy(root)
+                    val fromIdx = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && event.fromIndex >= 0) event.fromIndex else null
+                    val toIdx = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && event.toIndex >= 0) event.toIndex else null
+
                     val evalContext = ScrollEvaluationContext(
                         eventType = event.eventType,
                         packageName = pkg,
@@ -176,13 +184,46 @@ class ReelsAccessibilityService : AccessibilityService() {
                         sourceText = event.text.joinToString(" "),
                         contentDescription = event.contentDescription,
                         viewIdResourceName = try { event.source?.viewIdResourceName } catch (e: Exception) { null },
-                        windowHierarchyKeywords = hierarchyKeywords,
-                        eventTimestamp = android.os.SystemClock.uptimeMillis()
+                        windowHierarchyKeywords = inspection.keywords,
+                        eventTimestamp = android.os.SystemClock.uptimeMillis(),
+                        scrollPositionBefore = fromIdx,
+                        scrollPositionAfter = toIdx,
+                        isSourcePager = inspection.containsVideoPager
                     )
 
                     val result = reelDetectionEngine.evaluateEvent(evalContext)
+                    val classifiedFeed = reelDetectionEngine.classifyFeed(pkg, inspection.keywords)
+
                     if (DEBUG_LOGGING) {
-                        Log.d(TAG, "ReelEvaluation: pkg=$pkg result=$result dx=$deltaX dy=$deltaY")
+                        Log.d(TAG, "ReelEvaluation: pkg=$pkg result=$result dx=$deltaX dy=$deltaY feed=$classifiedFeed")
+                    }
+
+                    // Finding 2: Record redacted diagnostic metadata for forensic verification
+                    if (app.prefsRepository.isDiagnosticModeEnabled()) {
+                        val record = DiagnosticEventRecord(
+                            timestamp = System.currentTimeMillis(),
+                            eventType = event.eventType,
+                            eventTypeName = AccessibilityEvent.eventTypeToString(event.eventType),
+                            packageName = pkg,
+                            className = event.className?.toString(),
+                            scrollDeltaX = deltaX,
+                            scrollDeltaY = deltaY,
+                            scrollPositionBefore = fromIdx,
+                            scrollPositionAfter = toIdx,
+                            sourceNodeClass = event.source?.className?.toString(),
+                            sourceNodeResourceId = try { event.source?.viewIdResourceName } catch (e: Exception) { null },
+                            windowId = event.windowId,
+                            windowType = try { event.source?.window?.type ?: -1 } catch (e: Exception) { -1 },
+                            rootWindowPackage = try { rootInActiveWindow?.packageName?.toString() } catch (e: Exception) { null },
+                            isRootInActiveWindowNull = rootInActiveWindow == null,
+                            nodeHierarchyDepth = inspection.maxDepth,
+                            nodesInspectedCount = inspection.inspectedCount,
+                            feedClassifierResult = classifiedFeed.name,
+                            rejectionReason = result.name,
+                            containsVideoPager = inspection.containsVideoPager,
+                            exposedPagerClassOrId = inspection.exposedPagerClassOrId ?: "NONE_EXPOSED"
+                        )
+                        ReelDiagnosticLogger.recordEvent(record)
                     }
 
                     if (result == DetectionResult.CONFIRMED_REEL_INCREMENT) {
@@ -191,10 +232,12 @@ class ReelsAccessibilityService : AccessibilityService() {
                             Log.i(TAG, "Confirmed reel navigation for $pkg. New count: $newCount")
                         }
 
+                        // Concept 2: Only trigger full-screen block overlay if the app is guarded for usage-time/quota limits
+                        val isGuarded = app.prefsRepository.isAppBlocked(pkg)
                         val limit = app.prefsRepository.getAppDailyReelLimit(pkg)
                         val isBedtime = app.prefsRepository.isWithinBedtime()
 
-                        if ((newCount >= limit || isBedtime) && !app.prefsRepository.isSnoozed()) {
+                        if ((newCount >= limit || isBedtime) && isGuarded && !app.prefsRepository.isSnoozed()) {
                             if (DEBUG_LOGGING) {
                                 Log.w(TAG, "Reel quota or bedtime reached ($newCount/$limit). Launching overlay!")
                             }
@@ -214,6 +257,33 @@ class ReelsAccessibilityService : AccessibilityService() {
             AccessibilityEvent.TYPE_VIEW_LONG_CLICKED -> {
                 // Strict requirement: Clicks must never increment reel count
                 Log.d(TAG, "Ignored click event in $pkg (will never increment reels)")
+
+                if (app.prefsRepository.isDiagnosticModeEnabled() && app.prefsRepository.isAppReelMonitored(pkg)) {
+                    val record = DiagnosticEventRecord(
+                        timestamp = System.currentTimeMillis(),
+                        eventType = event.eventType,
+                        eventTypeName = AccessibilityEvent.eventTypeToString(event.eventType),
+                        packageName = pkg,
+                        className = event.className?.toString(),
+                        scrollDeltaX = 0,
+                        scrollDeltaY = 0,
+                        scrollPositionBefore = null,
+                        scrollPositionAfter = null,
+                        sourceNodeClass = event.source?.className?.toString(),
+                        sourceNodeResourceId = try { event.source?.viewIdResourceName } catch (e: Exception) { null },
+                        windowId = event.windowId,
+                        windowType = try { event.source?.window?.type ?: -1 } catch (e: Exception) { -1 },
+                        rootWindowPackage = try { rootInActiveWindow?.packageName?.toString() } catch (e: Exception) { null },
+                        isRootInActiveWindowNull = rootInActiveWindow == null,
+                        nodeHierarchyDepth = 0,
+                        nodesInspectedCount = 1,
+                        feedClassifierResult = "IGNORED_CLICK",
+                        rejectionReason = DetectionResult.REJECT_CLICK.name,
+                        containsVideoPager = false,
+                        exposedPagerClassOrId = "NONE_EXPOSED"
+                    )
+                    ReelDiagnosticLogger.recordEvent(record)
+                }
             }
         }
     }
@@ -221,7 +291,7 @@ class ReelsAccessibilityService : AccessibilityService() {
     private fun handleWindowStateChanged(pkg: String) {
         val app = BrainPalApp.instance
 
-        if (app.prefsRepository.isAppBlocked(pkg)) {
+        if (app.prefsRepository.isAppReelMonitored(pkg)) {
             currentActivePackage = pkg
             if (app.prefsRepository.isFloatingBubbleEnabled()) {
                 mainHandler.post { showOrUpdateFloatingBadge(pkg) }
@@ -235,7 +305,7 @@ class ReelsAccessibilityService : AccessibilityService() {
             null
         }
 
-        if (activeRootPkg != null && app.prefsRepository.isAppBlocked(activeRootPkg)) {
+        if (activeRootPkg != null && app.prefsRepository.isAppReelMonitored(activeRootPkg)) {
             currentActivePackage = activeRootPkg
             if (app.prefsRepository.isFloatingBubbleEnabled()) {
                 mainHandler.post { showOrUpdateFloatingBadge(activeRootPkg) }
@@ -249,7 +319,7 @@ class ReelsAccessibilityService : AccessibilityService() {
         } else if (isTransientSystemOverlay(pkg) || (activeRootPkg != null && isTransientSystemOverlay(activeRootPkg))) {
             Log.d(TAG, "Ignoring transient system overlay: pkg=$pkg activeRoot=$activeRootPkg")
         } else {
-            Log.d(TAG, "Switched away from guarded app to unblocked app: $pkg")
+            Log.d(TAG, "Switched away from monitored app to unmonitored app: $pkg")
             currentActivePackage = null
             mainHandler.post { hideFloatingBadge() }
         }
@@ -273,32 +343,62 @@ class ReelsAccessibilityService : AccessibilityService() {
                pkg == packageName
     }
 
-    private fun extractHierarchyKeywords(root: AccessibilityNodeInfo?): Set<String> {
-        if (root == null) return emptySet()
-        val keywords = mutableSetOf<String>()
-        val queue = ArrayDeque<AccessibilityNodeInfo>()
-        queue.add(root)
-        var inspectedCount = 0
+    data class HierarchyInspection(
+        val keywords: Set<String>,
+        val maxDepth: Int,
+        val inspectedCount: Int,
+        val containsVideoPager: Boolean,
+        val exposedPagerClassOrId: String?
+    )
 
-        while (queue.isNotEmpty() && inspectedCount < 80) {
-            val node = queue.removeFirst()
+    private fun inspectHierarchy(root: AccessibilityNodeInfo?): HierarchyInspection {
+        if (root == null) return HierarchyInspection(emptySet(), 0, 0, false, null)
+        val keywords = mutableSetOf<String>()
+        val queue = ArrayDeque<Pair<AccessibilityNodeInfo, Int>>()
+        queue.add(Pair(root, 1))
+        var inspectedCount = 0
+        var maxObservedDepth = 1
+        var containsVideoPager = false
+        var exposedPagerClassOrId: String? = null
+
+        while (queue.isNotEmpty() && inspectedCount < 100) {
+            val (node, depth) = queue.removeFirst()
             inspectedCount++
+            if (depth > maxObservedDepth) maxObservedDepth = depth
 
             val text = node.text?.toString()?.trim()
             val desc = node.contentDescription?.toString()?.trim()
             val resId = try { node.viewIdResourceName?.trim() } catch (e: Exception) { null }
+            val className = node.className?.toString()?.trim() ?: ""
 
             if (!text.isNullOrBlank()) keywords.add(text)
             if (!desc.isNullOrBlank()) keywords.add(desc)
             if (!resId.isNullOrBlank()) keywords.add(resId)
 
+            // Detect video pager exposing accessibility node
+            val isPagerClass = className.contains("ViewPager", ignoreCase = true) ||
+                    className.contains("RecyclerView", ignoreCase = true)
+            val isPagerResId = !resId.isNullOrBlank() && (
+                    resId.contains("pager", ignoreCase = true) ||
+                    resId.contains("reel_player", ignoreCase = true) ||
+                    resId.contains("clips_video", ignoreCase = true) ||
+                    resId.contains("spotlight_player", ignoreCase = true) ||
+                    resId.contains("shorts_container", ignoreCase = true)
+            )
+
+            if ((isPagerClass || isPagerResId) && !containsVideoPager) {
+                containsVideoPager = true
+                exposedPagerClassOrId = resId ?: className
+            }
+
             if (node.isSelected) {
                 if (!desc.isNullOrBlank()) keywords.add("selected_${desc.lowercase().replace(" ", "_")}")
                 if (!text.isNullOrBlank()) keywords.add("selected_${text.lowercase().replace(" ", "_")}")
+                if (!resId.isNullOrBlank()) keywords.add("selected_${resId.lowercase()}")
             }
 
             // Check if node is an active text input or comment composer
-            if (node.isEditable || node.className == "android.widget.EditText") {
+            if (node.isEditable || className == "android.widget.EditText") {
                 keywords.add("has_active_text_input")
                 val hint = node.hintText?.toString() ?: ""
                 val fullText = "$text $hint"
@@ -315,7 +415,7 @@ class ReelsAccessibilityService : AccessibilityService() {
 
             if (!resId.isNullOrBlank()) {
                 val idLower = resId.lowercase()
-                if (idLower.contains("comment") && (idLower.contains("thread") || idLower.contains("composer") || idLower.contains("sheet") || idLower.contains("list") || idLower.contains("row"))) {
+                if (idLower.contains("comment") && (idLower.contains("thread") || idLower.contains("composer") || idLower.contains("sheet") || idLower.contains("list") || idLower.contains("row") || idLower.contains("recycler"))) {
                     keywords.add("active_comment_composer")
                     keywords.add("comments_sheet")
                 }
@@ -337,11 +437,11 @@ class ReelsAccessibilityService : AccessibilityService() {
             for (i in 0 until node.childCount) {
                 val child = try { node.getChild(i) } catch (e: Exception) { null }
                 if (child != null) {
-                    queue.add(child)
+                    queue.add(Pair(child, depth + 1))
                 }
             }
         }
-        return keywords
+        return HierarchyInspection(keywords, maxObservedDepth, inspectedCount, containsVideoPager, exposedPagerClassOrId)
     }
 
     @SuppressLint("ClickableViewAccessibility")

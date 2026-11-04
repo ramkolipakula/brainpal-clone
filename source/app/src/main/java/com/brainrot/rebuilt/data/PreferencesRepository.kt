@@ -16,6 +16,8 @@ class PreferencesRepository(context: Context) {
 
     companion object {
         private const val KEY_BLOCKED_PACKAGES = "blocked_packages"
+        private const val KEY_MONITORED_REEL_PACKAGES = "monitored_reel_packages"
+        private const val KEY_DIAGNOSTIC_MODE_ENABLED = "diagnostic_mode_enabled"
         private const val KEY_DAILY_LIMIT_MINS = "daily_limit_mins"
         private const val KEY_DAILY_REEL_LIMIT = "daily_reel_limit"
         private const val KEY_ROAST_LANG = "roast_lang"
@@ -35,7 +37,14 @@ class PreferencesRepository(context: Context) {
         private const val KEY_REEL_COUNT_PREFIX = "reels_today_"
         private const val KEY_INTERVENTIONS_PREFIX = "interventions_today_"
 
-        private val DEFAULT_BLOCKED_PACKAGES = setOf(
+        val DEFAULT_BLOCKED_PACKAGES = setOf(
+            "com.instagram.android",
+            "com.google.android.youtube",
+            "com.snapchat.android",
+            "com.zhiliaoapp.musically"
+        )
+
+        val DEFAULT_MONITORED_REEL_PACKAGES = setOf(
             "com.instagram.android",
             "com.google.android.youtube",
             "com.snapchat.android",
@@ -86,6 +95,12 @@ class PreferencesRepository(context: Context) {
     private val _blockedPackagesFlow = MutableStateFlow(getBlockedPackages())
     val blockedPackagesFlow: StateFlow<Set<String>> = _blockedPackagesFlow.asStateFlow()
 
+    private val _monitoredReelPackagesFlow = MutableStateFlow(getMonitoredReelPackages())
+    val monitoredReelPackagesFlow: StateFlow<Set<String>> = _monitoredReelPackagesFlow.asStateFlow()
+
+    private val _diagnosticModeEnabledFlow = MutableStateFlow(isDiagnosticModeEnabled())
+    val diagnosticModeEnabledFlow: StateFlow<Boolean> = _diagnosticModeEnabledFlow.asStateFlow()
+
     private val _streakDaysFlow = MutableStateFlow(getStreakDays())
     val streakDaysFlow: StateFlow<Int> = _streakDaysFlow.asStateFlow()
 
@@ -117,6 +132,8 @@ class PreferencesRepository(context: Context) {
             key == KEY_BEDTIME_START_HOUR -> _bedtimeStartHourFlow.value = getBedtimeStartHour()
             key == KEY_BEDTIME_END_HOUR -> _bedtimeEndHourFlow.value = getBedtimeEndHour()
             key == KEY_BLOCKED_PACKAGES -> _blockedPackagesFlow.value = getBlockedPackages()
+            key == KEY_MONITORED_REEL_PACKAGES -> _monitoredReelPackagesFlow.value = getMonitoredReelPackages()
+            key == KEY_DIAGNOSTIC_MODE_ENABLED -> _diagnosticModeEnabledFlow.value = isDiagnosticModeEnabled()
             key == KEY_STREAK_DAYS -> _streakDaysFlow.value = getStreakDays()
             key.startsWith(KEY_APP_LIMIT_PREFIX) -> _perAppMinuteLimitsFlow.value = loadAllAppMinuteLimits()
             key.startsWith(KEY_APP_REEL_LIMIT_PREFIX) -> _perAppReelLimitsFlow.value = loadAllAppReelLimits()
@@ -158,6 +175,30 @@ class PreferencesRepository(context: Context) {
 
     fun isAppBlocked(packageName: String): Boolean {
         return getBlockedPackages().contains(packageName)
+    }
+
+    // Concept 1: App is monitored for reel counting (independent of usage-time guarding)
+    fun getMonitoredReelPackages(): Set<String> {
+        return prefs.getStringSet(KEY_MONITORED_REEL_PACKAGES, DEFAULT_MONITORED_REEL_PACKAGES) ?: emptySet()
+    }
+
+    fun setMonitoredReelPackages(packages: Set<String>) {
+        prefs.edit().putStringSet(KEY_MONITORED_REEL_PACKAGES, packages).apply()
+        _monitoredReelPackagesFlow.value = packages
+    }
+
+    fun isAppReelMonitored(packageName: String): Boolean {
+        return getMonitoredReelPackages().contains(packageName)
+    }
+
+    // Temporary diagnostic event capture mode toggle (Finding 2)
+    fun isDiagnosticModeEnabled(): Boolean {
+        return prefs.getBoolean(KEY_DIAGNOSTIC_MODE_ENABLED, true)
+    }
+
+    fun setDiagnosticModeEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_DIAGNOSTIC_MODE_ENABLED, enabled).apply()
+        _diagnosticModeEnabledFlow.value = enabled
     }
 
     fun getDailyLimitMinutes(): Int {

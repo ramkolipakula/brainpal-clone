@@ -35,14 +35,27 @@ data class ScrollEvaluationContext(
     val contentDescription: CharSequence? = null,
     val viewIdResourceName: String? = null,
     val windowHierarchyKeywords: Set<String> = emptySet(),
-    val eventTimestamp: Long = System.currentTimeMillis()
+    val eventTimestamp: Long = System.currentTimeMillis(),
+    val scrollPositionBefore: Int? = null,
+    val scrollPositionAfter: Int? = null,
+    val isSourcePager: Boolean = false
+)
+
+/**
+ * Per-app tracking state for independent debounce and feed isolation (Finding 5).
+ */
+data class AppState(
+    var lastConfirmedSwipeTimestamp: Long = 0L,
+    var lastSourceViewId: String? = null,
+    var lastScrollPosition: Int? = null,
+    var lastFeedType: FeedType = FeedType.NON_FEED_OR_UNTRACKED
 )
 
 class ReelDetectionEngine(
-    private val debounceWindowMs: Long = 600L
+    private val debounceWindowMs: Long = 350L
 ) {
-    private var lastConfirmedSwipeTimestamp: Long = 0L
-    private var lastActivePackage: String? = null
+    // Independent per-app gesture tracking to eliminate cross-app interference
+    private val appStates = mutableMapOf<String, AppState>()
 
     companion object {
         const val PKG_INSTAGRAM = "com.instagram.android"
@@ -63,8 +76,7 @@ class ReelDetectionEngine(
             "comments_sheet", "comments_list", "comment_row", "comment_thread",
             "active_message_composer", "direct_thread", "direct_composer", "inbox",
             "active_search_input", "search_edit_text",
-            "edit profile", "edit_profile", "change profile photo", "self_profile",
-            "selected_home", "row_feed_carousel"
+            "edit profile", "edit_profile", "change profile photo", "self_profile"
         )
 
         // YouTube Shorts positive feed semantic indicators
@@ -73,12 +85,12 @@ class ReelDetectionEngine(
             "selected_shorts", "shorts_pager", "reel_watch_fragment"
         )
 
-        // YouTube negative context indicators (Active comments sheet, Watch panel, Subscriptions feed, Home feed)
+        // YouTube negative context indicators (Comments sheet, Regular watch panel, Search)
+        // CRITICAL ROOT-CAUSE FIX: "video_player", "watch_while_layout", "player_fragment_container"
+        // REMOVED from negative indicators because they exist in YouTube's main window during Shorts playback!
         private val YT_NEGATIVE = setOf(
             "active_comment_composer", "comment_composer", "comments_sheet", "comment_thread",
-            "comments_list", "watch_panel", "player_fragment_container", "watch_while_layout",
-            "video_player", "selected_home", "selected_subscriptions", "feed_filter_bar",
-            "search_results", "search_edit_text"
+            "comments_list", "watch_panel", "search_results", "search_edit_text"
         )
 
         // Snapchat Spotlight positive feed semantic indicators
@@ -88,19 +100,22 @@ class ReelDetectionEngine(
             "remix snap"
         )
 
-        // Snapchat negative context indicators (Camera, Chat, Map, Stories, Search)
+        // Snapchat negative context indicators (Active camera shutter, Chat conversation, Map, Stories)
+        // CRITICAL ROOT-CAUSE FIX: Bare words "chat", "map", "camera" REMOVED because Snapchat's bottom
+        // navigation bar always displays all 5 tabs ("Map", "Chat", "Camera", "Stories", "Spotlight")!
+        // We now check selected tab states and specific active camera/chat composers.
         private val SNAP_NEGATIVE = setOf(
             "selected_camera", "take picture", "record video", "flip camera", "flash", "lenses",
-            "capture_button", "selected_chat", "chat", "messages", "send a chat",
-            "active_chat", "friend_feed", "selected_map", "snap map", "map",
-            "selected_stories", "discover_feed", "story_player", "search_bar", "bitmoji"
+            "capture_button", "selected_chat", "messages", "send a chat",
+            "active_chat", "friend_feed", "selected_map", "snap map",
+            "selected_stories", "discover_feed", "story_player", "search_bar"
         )
 
         // Button / Interactive control action keywords to reject
         private val INTERACTIVE_CONTROL_KEYWORDS = setOf(
             "like", "dislike", "comment", "comments", "share", "send", "save", "bookmark",
             "remix", "sound", "audio", "more options", "options", "follow", "subscribe",
-            "channel", "profile", "camera", "search", "back", "close"
+            "channel", "profile", "camera", "search", "back", "close", "shutter"
         )
     }
 
@@ -140,11 +155,21 @@ class ReelDetectionEngine(
 
         when (pkg) {
             PKG_INSTAGRAM -> {
-                // Check negative context (comments drawer, chat, profile edit, home feed)
+                // Check negative context (comments drawer, chat, profile edit)
                 for (neg in INSTA_NEGATIVE) {
                     if (contextString.contains(neg)) {
                         return DetectionResult.REJECT_NON_REELS_CONTEXT
                     }
+                }
+
+                // If user is on the Home tab, but NOT in full-screen Reels viewer
+                val isHomeSelected = contextString.contains("selected_home") || contextString.contains("row_feed_carousel")
+                val isReelsViewerActive = contextString.contains("clips_view_pager") ||
+                        contextString.contains("reel_viewer") ||
+                        contextString.contains("clips_video_container")
+
+                if (isHomeSelected && !isReelsViewerActive) {
+                    return DetectionResult.REJECT_NON_REELS_CONTEXT
                 }
 
                 // Check positive Reels presence
@@ -161,11 +186,21 @@ class ReelDetectionEngine(
             }
 
             PKG_YOUTUBE -> {
-                // Check negative context (comments sheet, main watch panel, home feed)
+                // Check negative context (active comments sheet, search)
                 for (neg in YT_NEGATIVE) {
                     if (contextString.contains(neg)) {
                         return DetectionResult.REJECT_NON_SHORTS_CONTEXT
                     }
+                }
+
+                // If on Home or Subscriptions tab without Shorts container
+                val isOtherTab = (contextString.contains("selected_home") || contextString.contains("selected_subscriptions")) &&
+                        !contextString.contains("selected_shorts") &&
+                        !contextString.contains("reel_watch_fragment") &&
+                        !contextString.contains("reel_player")
+
+                if (isOtherTab) {
+                    return DetectionResult.REJECT_NON_SHORTS_CONTEXT
                 }
 
                 // Check positive Shorts presence
@@ -182,10 +217,17 @@ class ReelDetectionEngine(
             }
 
             PKG_SNAPCHAT -> {
-                // Check negative context (camera, chat messages, snap map, stories)
-                for (neg in SNAP_NEGATIVE) {
-                    if (contextString.contains(neg)) {
-                        return DetectionResult.REJECT_NON_SPOTLIGHT_CONTEXT
+                // If Spotlight tab is explicitly selected, prioritize Spotlight
+                val isSpotlightSelected = contextString.contains("selected_spotlight") ||
+                        contextString.contains("vertical_spotlight_pager") ||
+                        contextString.contains("spotlight_viewer")
+
+                if (!isSpotlightSelected) {
+                    // Check negative context (camera, chat, map, stories)
+                    for (neg in SNAP_NEGATIVE) {
+                        if (contextString.contains(neg)) {
+                            return DetectionResult.REJECT_NON_SPOTLIGHT_CONTEXT
+                        }
                     }
                 }
 
@@ -203,17 +245,20 @@ class ReelDetectionEngine(
             }
         }
 
-        // Stage 6: Swipe burst deduplication
+        // Stage 6: Swipe burst deduplication per app (Finding 5)
         val now = context.eventTimestamp
-        val timeSinceLastSwipe = now - lastConfirmedSwipeTimestamp
+        val state = appStates.getOrPut(pkg) { AppState() }
+        val timeSinceLastSwipe = now - state.lastConfirmedSwipeTimestamp
 
-        if (timeSinceLastSwipe in 1 until debounceWindowMs && lastActivePackage == pkg) {
+        if (timeSinceLastSwipe in 1 until debounceWindowMs) {
             return DetectionResult.REJECT_DEDUPLICATE_BURST
         }
 
         // Stage 7: Confirmed legitimate video navigation!
-        lastConfirmedSwipeTimestamp = now
-        lastActivePackage = pkg
+        state.lastConfirmedSwipeTimestamp = now
+        state.lastSourceViewId = context.viewIdResourceName
+        state.lastScrollPosition = context.scrollPositionAfter
+        state.lastFeedType = classifyFeed(pkg, context.windowHierarchyKeywords)
         return DetectionResult.CONFIRMED_REEL_INCREMENT
     }
 
@@ -241,7 +286,11 @@ class ReelDetectionEngine(
         }
 
         // Check if the scrolled view is an active comment entry or comment row
-        if (resIdStr.contains("comment_row") || resIdStr.contains("comment_thread_view") || resIdStr.contains("comments_recycler")) {
+        if (resIdStr.contains("comment_row") ||
+            resIdStr.contains("comment_thread") ||
+            resIdStr.contains("comments_recycler") ||
+            resIdStr.contains("comment_composer")
+        ) {
             return true
         }
 
@@ -301,7 +350,14 @@ class ReelDetectionEngine(
     }
 
     fun resetState() {
-        lastConfirmedSwipeTimestamp = 0L
-        lastActivePackage = null
+        appStates.clear()
+    }
+
+    fun resetState(pkg: String) {
+        appStates.remove(pkg)
+    }
+
+    fun getLastConfirmedTimestamp(pkg: String): Long {
+        return appStates[pkg]?.lastConfirmedSwipeTimestamp ?: 0L
     }
 }
