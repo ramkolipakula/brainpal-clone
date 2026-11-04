@@ -56,3 +56,4 @@ Real-time, resilient on-device intervention against mindless social media scroll
 
 ---
 *Last updated: 2026-11-03 after GSD Onboarding & Doc Ingest*
+

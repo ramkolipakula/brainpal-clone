@@ -44,6 +44,9 @@ class BlockOverlayActivity : ComponentActivity() {
 
         val targetPackage = intent.getStringExtra("TARGET_PACKAGE") ?: "Social App"
         val app = BrainPalApp.instance
+        if (savedInstanceState == null) {
+            app.prefsRepository.incrementTodayInterventionsCount()
+        }
         val isStrictMode = intent.getBooleanExtra("IS_STRICT_MODE", app.prefsRepository.isStrictMode())
         val roastLang = app.prefsRepository.getRoastLanguage()
         val meme = app.memeRepository.getRandomMeme(roastLang)

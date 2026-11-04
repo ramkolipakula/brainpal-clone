@@ -39,9 +39,8 @@ fun SettingsScreen() {
     val languages = remember { app.memeRepository.getAvailableLanguages() }
 
     LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 88.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
@@ -74,10 +73,13 @@ fun SettingsScreen() {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Icon(Icons.Default.Translate, contentDescription = null, tint = CoralPrimary)
                         Spacer(modifier = Modifier.width(14.dp))
-                        Column {
+                        Column(modifier = Modifier.weight(1f, fill = false)) {
                             Text(
                                 text = "Roast Meme Language",
                                 style = MaterialTheme.typography.titleMedium,
@@ -90,6 +92,7 @@ fun SettingsScreen() {
                             )
                         }
                     }
+                    Spacer(modifier = Modifier.width(8.dp))
                     Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color.Gray)
                 }
             }
@@ -271,10 +274,13 @@ fun SettingsScreen() {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Icon(Icons.Default.HourglassTop, contentDescription = null, tint = GreenSuccess)
                         Spacer(modifier = Modifier.width(14.dp))
-                        Column {
+                        Column(modifier = Modifier.weight(1f, fill = false)) {
                             Text(
                                 text = "Emergency Passes",
                                 style = MaterialTheme.typography.titleMedium,
@@ -287,10 +293,21 @@ fun SettingsScreen() {
                             )
                         }
                     }
-                    TextButton(onClick = {
-                        app.prefsRepository.resetDailyPasses()
-                    }) {
-                        Text("Replenish", color = CoralPrimary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    TextButton(
+                        onClick = {
+                            app.prefsRepository.resetDailyPasses()
+                        },
+                        modifier = Modifier
+                            .wrapContentSize()
+                            .defaultMinSize(minWidth = 80.dp)
+                    ) {
+                        Text(
+                            text = "Replenish",
+                            color = CoralPrimary,
+                            maxLines = 1,
+                            softWrap = false
+                        )
                     }
                 }
             }
@@ -310,12 +327,15 @@ fun SettingsScreen() {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Icon(Icons.Default.RestartAlt, contentDescription = null, tint = OrangeWarning)
                         Spacer(modifier = Modifier.width(14.dp))
-                        Column {
+                        Column(modifier = Modifier.weight(1f, fill = false)) {
                             Text(
-                                text = "Detox Streak: Day $streakDays",
+                                text = "Detox Streak: ${if (streakDays == 1) "1 Day" else "$streakDays Days"}",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold
                             )
@@ -326,8 +346,19 @@ fun SettingsScreen() {
                             )
                         }
                     }
-                    TextButton(onClick = { showResetConfirm = true }) {
-                        Text("Reset", color = OrangeWarning)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    TextButton(
+                        onClick = { showResetConfirm = true },
+                        modifier = Modifier
+                            .wrapContentSize()
+                            .defaultMinSize(minWidth = 72.dp)
+                    ) {
+                        Text(
+                            text = "Reset",
+                            color = OrangeWarning,
+                            maxLines = 1,
+                            softWrap = false
+                        )
                     }
                 }
             }
@@ -360,12 +391,16 @@ fun SettingsScreen() {
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Version: 1.0.2-phase10 (Release)",
+                        text = "Version: 1.0.3-phase10.1 (Release)",
                         style = MaterialTheme.typography.labelSmall,
                         color = CoralPrimary
                     )
                 }
             }
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 
@@ -416,7 +451,7 @@ fun SettingsScreen() {
         AlertDialog(
             onDismissRequest = { showResetConfirm = false },
             title = { Text("Reset Detox Streak?") },
-            text = { Text("Are you sure you want to reset your streak back to Day 1? This cannot be undone.") },
+            text = { Text("Are you sure you want to reset your streak back to 1 Day? This cannot be undone.") },
             confirmButton = {
                 Button(
                     onClick = {
@@ -425,7 +460,7 @@ fun SettingsScreen() {
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = CoralPrimary)
                 ) {
-                    Text("Reset to Day 1")
+                    Text("Reset to 1 Day")
                 }
             },
             dismissButton = {

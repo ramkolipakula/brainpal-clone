@@ -33,6 +33,7 @@ class PreferencesRepository(context: Context) {
         private const val KEY_APP_LIMIT_PREFIX = "app_limit_mins_"
         private const val KEY_APP_REEL_LIMIT_PREFIX = "app_reel_limit_"
         private const val KEY_REEL_COUNT_PREFIX = "reels_today_"
+        private const val KEY_INTERVENTIONS_PREFIX = "interventions_today_"
 
         private val DEFAULT_BLOCKED_PACKAGES = setOf(
             "com.instagram.android",
@@ -94,12 +95,17 @@ class PreferencesRepository(context: Context) {
     private val _perAppReelLimitsFlow = MutableStateFlow<Map<String, Int>>(loadAllAppReelLimits())
     val perAppReelLimitsFlow: StateFlow<Map<String, Int>> = _perAppReelLimitsFlow.asStateFlow()
 
+    private val _todayInterventionsFlow = MutableStateFlow(getTodayInterventionsCount())
+    val todayInterventionsFlow: StateFlow<Int> = _todayInterventionsFlow.asStateFlow()
+
     // Automatic preference listener to keep StateFlows in lockstep even across processes/receivers
     private val prefChangeListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == null) return@OnSharedPreferenceChangeListener
         val todayKey = KEY_REEL_COUNT_PREFIX + getTodayDateKey()
+        val todayInterventionsKey = KEY_INTERVENTIONS_PREFIX + getTodayDateKey()
         when {
             key == todayKey -> _todayReelCountFlow.value = getTodayReelCount()
+            key == todayInterventionsKey -> _todayInterventionsFlow.value = getTodayInterventionsCount()
             key == KEY_DAILY_REEL_LIMIT -> _dailyReelLimitFlow.value = getDailyReelLimit()
             key == KEY_DAILY_LIMIT_MINS -> _dailyLimitMinutesFlow.value = getDailyLimitMinutes()
             key == KEY_BUBBLE_ENABLED -> _floatingBubbleEnabledFlow.value = isFloatingBubbleEnabled()
@@ -163,6 +169,15 @@ class PreferencesRepository(context: Context) {
         _dailyLimitMinutesFlow.value = minutes
     }
 
+    fun hasCustomAppLimitMinutes(packageName: String): Boolean {
+        return prefs.contains(KEY_APP_LIMIT_PREFIX + packageName)
+    }
+
+    fun removeCustomAppLimitMinutes(packageName: String) {
+        prefs.edit().remove(KEY_APP_LIMIT_PREFIX + packageName).apply()
+        _perAppMinuteLimitsFlow.value = loadAllAppMinuteLimits()
+    }
+
     fun getAppDailyLimitMinutes(packageName: String): Int {
         return prefs.getInt(KEY_APP_LIMIT_PREFIX + packageName, getDailyLimitMinutes())
     }
@@ -180,6 +195,15 @@ class PreferencesRepository(context: Context) {
         val safeLimit = kotlin.math.max(limit, 1)
         prefs.edit().putInt(KEY_DAILY_REEL_LIMIT, safeLimit).apply()
         _dailyReelLimitFlow.value = safeLimit
+    }
+
+    fun hasCustomAppReelLimit(packageName: String): Boolean {
+        return prefs.contains(KEY_APP_REEL_LIMIT_PREFIX + packageName)
+    }
+
+    fun removeCustomAppReelLimit(packageName: String) {
+        prefs.edit().remove(KEY_APP_REEL_LIMIT_PREFIX + packageName).apply()
+        _perAppReelLimitsFlow.value = loadAllAppReelLimits()
     }
 
     fun getAppDailyReelLimit(packageName: String): Int {
@@ -211,6 +235,26 @@ class PreferencesRepository(context: Context) {
         val safeCount = kotlin.math.max(count, 0)
         prefs.edit().putInt(key, safeCount).apply()
         _todayReelCountFlow.value = safeCount
+    }
+
+    // Interventions Persistence (Tracking actual quota/bedtime interventions)
+    fun getTodayInterventionsCount(): Int {
+        val key = KEY_INTERVENTIONS_PREFIX + getTodayDateKey()
+        return prefs.getInt(key, 0)
+    }
+
+    fun incrementTodayInterventionsCount(): Int {
+        val key = KEY_INTERVENTIONS_PREFIX + getTodayDateKey()
+        val current = prefs.getInt(key, 0) + 1
+        prefs.edit().putInt(key, current).apply()
+        _todayInterventionsFlow.value = current
+        return current
+    }
+
+    fun resetTodayInterventions() {
+        val key = KEY_INTERVENTIONS_PREFIX + getTodayDateKey()
+        prefs.edit().putInt(key, 0).apply()
+        _todayInterventionsFlow.value = 0
     }
 
     fun getRoastLanguage(): String {
@@ -245,6 +289,11 @@ class PreferencesRepository(context: Context) {
 
     fun getStreakDays(): Int {
         return prefs.getInt(KEY_STREAK_DAYS, 1)
+    }
+
+    fun getStreakDisplayString(): String {
+        val days = getStreakDays()
+        return if (days == 1) "1 Day" else "$days Days"
     }
 
     fun incrementStreak() {
@@ -360,6 +409,7 @@ class PreferencesRepository(context: Context) {
             incrementStreak()
             // Reset today's flow to today's count (0)
             _todayReelCountFlow.value = getTodayReelCount()
+            _todayInterventionsFlow.value = getTodayInterventionsCount()
         }
         prefs.edit().putString(KEY_LAST_ACTIVE_DATE, today).apply()
     }

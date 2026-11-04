@@ -83,10 +83,11 @@ fun HomeScreen(
 
     val percentage = if (limitMinutes > 0) (totalMinutesSpent.toFloat() / limitMinutes.toFloat()) else 0f
 
+    val streakLabel = if (streakDays == 1) "1 Day" else "$streakDays Days"
+
     LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 88.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // Top Header
@@ -104,7 +105,7 @@ fun HomeScreen(
                         color = CoralPrimary
                     )
                     Text(
-                        text = "Day $streakDays Dopamine Detox Streak 🔥",
+                        text = "$streakLabel Dopamine Detox Streak 🔥",
                         style = MaterialTheme.typography.bodyMedium,
                         color = Color.Gray
                     )
@@ -346,6 +347,10 @@ fun HomeScreen(
                     )
                 }
             }
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }

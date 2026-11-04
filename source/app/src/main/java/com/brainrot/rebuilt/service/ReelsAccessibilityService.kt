@@ -41,11 +41,12 @@ class ReelsAccessibilityService : AccessibilityService() {
     private var badgeParams: WindowManager.LayoutParams? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private val reelDetectionEngine = ReelDetectionEngine(debounceWindowMs = 800L)
+    private val reelDetectionEngine = ReelDetectionEngine(debounceWindowMs = 600L)
     private var currentActivePackage: String? = null
 
     companion object {
         private const val TAG = "BrainPalA11y"
+        private const val DEBUG_LOGGING = false // Toggle for safe debug-only logging
         var isServiceConnected = false
             private set
     }
@@ -58,10 +59,9 @@ class ReelsAccessibilityService : AccessibilityService() {
 
         val app = BrainPalApp.instance
 
-        // Observe reactive StateFlows for live synchronization (Phase 3)
+        // Observe reactive StateFlows for live synchronization
         serviceScope.launch {
             app.prefsRepository.floatingBubbleEnabledFlow.collect { enabled ->
-                Log.d(TAG, "FloatingBubbleEnabled changed: $enabled")
                 if (!enabled) {
                     hideFloatingBadge()
                 } else {
@@ -76,15 +76,28 @@ class ReelsAccessibilityService : AccessibilityService() {
 
         serviceScope.launch {
             app.prefsRepository.todayReelCountFlow.collect { count ->
-                val target = app.prefsRepository.getDailyReelLimit()
+                val target = currentActivePackage?.let { app.prefsRepository.getAppDailyReelLimit(it) }
+                    ?: app.prefsRepository.getDailyReelLimit()
                 val isLarge = app.prefsRepository.getBubbleSize() == "large"
                 floatingBadgeView?.updateData(count, target, isLarge)
             }
         }
 
         serviceScope.launch {
-            app.prefsRepository.dailyReelLimitFlow.collect { target ->
+            app.prefsRepository.dailyReelLimitFlow.collect { globalTarget ->
                 val count = app.prefsRepository.getTodayReelCount()
+                val target = currentActivePackage?.let { app.prefsRepository.getAppDailyReelLimit(it) }
+                    ?: globalTarget
+                val isLarge = app.prefsRepository.getBubbleSize() == "large"
+                floatingBadgeView?.updateData(count, target, isLarge)
+            }
+        }
+
+        serviceScope.launch {
+            app.prefsRepository.perAppReelLimitsFlow.collect { _ ->
+                val count = app.prefsRepository.getTodayReelCount()
+                val target = currentActivePackage?.let { app.prefsRepository.getAppDailyReelLimit(it) }
+                    ?: app.prefsRepository.getDailyReelLimit()
                 val isLarge = app.prefsRepository.getBubbleSize() == "large"
                 floatingBadgeView?.updateData(count, target, isLarge)
             }
@@ -93,7 +106,8 @@ class ReelsAccessibilityService : AccessibilityService() {
         serviceScope.launch {
             app.prefsRepository.bubbleSizeFlow.collect { size ->
                 val count = app.prefsRepository.getTodayReelCount()
-                val target = app.prefsRepository.getDailyReelLimit()
+                val target = currentActivePackage?.let { app.prefsRepository.getAppDailyReelLimit(it) }
+                    ?: app.prefsRepository.getDailyReelLimit()
                 floatingBadgeView?.updateData(count, target, size == "large")
             }
         }
@@ -167,17 +181,23 @@ class ReelsAccessibilityService : AccessibilityService() {
                     )
 
                     val result = reelDetectionEngine.evaluateEvent(evalContext)
-                    Log.d(TAG, "ReelEvaluation: pkg=$pkg result=$result dx=$deltaX dy=$deltaY")
+                    if (DEBUG_LOGGING) {
+                        Log.d(TAG, "ReelEvaluation: pkg=$pkg result=$result dx=$deltaX dy=$deltaY")
+                    }
 
                     if (result == DetectionResult.CONFIRMED_REEL_INCREMENT) {
                         val newCount = app.prefsRepository.incrementTodayReelCount()
-                        Log.i(TAG, "Confirmed reel navigation for $pkg. New count: $newCount")
+                        if (DEBUG_LOGGING) {
+                            Log.i(TAG, "Confirmed reel navigation for $pkg. New count: $newCount")
+                        }
 
                         val limit = app.prefsRepository.getAppDailyReelLimit(pkg)
                         val isBedtime = app.prefsRepository.isWithinBedtime()
 
                         if ((newCount >= limit || isBedtime) && !app.prefsRepository.isSnoozed()) {
-                            Log.w(TAG, "Reel quota or bedtime reached ($newCount/$limit). Launching overlay!")
+                            if (DEBUG_LOGGING) {
+                                Log.w(TAG, "Reel quota or bedtime reached ($newCount/$limit). Launching overlay!")
+                            }
                             val intent = Intent(this, BlockOverlayActivity::class.java).apply {
                                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                                 putExtra("TARGET_PACKAGE", pkg)
@@ -295,11 +315,22 @@ class ReelsAccessibilityService : AccessibilityService() {
 
             if (!resId.isNullOrBlank()) {
                 val idLower = resId.lowercase()
-                if (idLower.contains("comment") && (idLower.contains("thread") || idLower.contains("composer") || idLower.contains("sheet") || idLower.contains("list"))) {
+                if (idLower.contains("comment") && (idLower.contains("thread") || idLower.contains("composer") || idLower.contains("sheet") || idLower.contains("list") || idLower.contains("row"))) {
                     keywords.add("active_comment_composer")
+                    keywords.add("comments_sheet")
                 }
                 if (idLower.contains("direct") && (idLower.contains("thread") || idLower.contains("composer") || idLower.contains("message"))) {
                     keywords.add("active_message_composer")
+                    keywords.add("direct_thread")
+                }
+                if (idLower.contains("camera") || idLower.contains("capture")) {
+                    keywords.add("selected_camera")
+                }
+                if (idLower.contains("spotlight")) {
+                    keywords.add("spotlight")
+                }
+                if (idLower.contains("chat") && (idLower.contains("feed") || idLower.contains("view"))) {
+                    keywords.add("selected_chat")
                 }
             }
 

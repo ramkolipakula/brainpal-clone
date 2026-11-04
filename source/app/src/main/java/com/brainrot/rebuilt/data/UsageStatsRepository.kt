@@ -168,6 +168,13 @@ class UsageStatsRepository(private val context: Context) {
                     }
                 }
             }
+
+            // If an app is still in foreground right now, account for ongoing session
+            if (lastPkg != null && lastResumeTime > 0) {
+                val ongoingDuration = (now - lastResumeTime).coerceAtLeast(0L)
+                val currentHour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+                hourlyMinutesMap[currentHour] = (hourlyMinutesMap[currentHour] ?: 0L) + (ongoingDuration / 60000L)
+            }
         } catch (e: Exception) {
             e.printStackTrace()
         }

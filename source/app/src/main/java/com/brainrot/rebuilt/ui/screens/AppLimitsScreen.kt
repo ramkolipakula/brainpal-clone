@@ -43,6 +43,7 @@ fun AppLimitsScreen() {
     val globalReels by app.prefsRepository.dailyReelLimitFlow.collectAsState()
     val blockedPackages by app.prefsRepository.blockedPackagesFlow.collectAsState()
     val perAppMinuteLimits by app.prefsRepository.perAppMinuteLimitsFlow.collectAsState()
+    val perAppReelLimits by app.prefsRepository.perAppReelLimitsFlow.collectAsState()
 
     // Dynamic discovery of installed applications on the device
     val allApps = remember {
@@ -98,9 +99,8 @@ fun AppLimitsScreen() {
     }
 
     LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 88.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
@@ -130,7 +130,12 @@ fun AppLimitsScreen() {
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Default quotas apply to all guarded apps unless custom overrides are set below",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray
+                    )
+                    Spacer(modifier = Modifier.height(14.dp))
 
                     Text("Default Screen Time: $globalMinutes mins / day")
                     Slider(
@@ -175,7 +180,10 @@ fun AppLimitsScreen() {
         // List of Apps
         items(filteredApps, key = { it.packageName }) { item ->
             val isGuarded = blockedPackages.contains(item.packageName)
-            val currentAppLimit = perAppMinuteLimits[item.packageName] ?: globalMinutes
+            val hasCustomMinutes = app.prefsRepository.hasCustomAppLimitMinutes(item.packageName)
+            val hasCustomReels = app.prefsRepository.hasCustomAppReelLimit(item.packageName)
+            val currentAppLimitMins = perAppMinuteLimits[item.packageName] ?: globalMinutes
+            val currentAppLimitReels = perAppReelLimits[item.packageName] ?: globalReels
             val isExpanded = expandedPackage == item.packageName
 
             Card(
@@ -205,16 +213,39 @@ fun AppLimitsScreen() {
                             )
                             Spacer(modifier = Modifier.width(14.dp))
                             Column {
-                                Text(
-                                    text = item.displayName,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    text = if (isGuarded) "Limit: $currentAppLimit mins/day" else "Not Guarded",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (isGuarded) GreenSuccess else Color.Gray
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = item.displayName,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Surface(
+                                        color = if (isGuarded) CoralPrimary.copy(alpha = 0.15f) else Color.DarkGray.copy(alpha = 0.5f),
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Text(
+                                            text = if (isGuarded) "Guarded" else "Excluded",
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isGuarded) CoralPrimary else Color.Gray
+                                        )
+                                    }
+                                }
+                                if (isGuarded) {
+                                    Text(
+                                        text = "Time: ${currentAppLimitMins}m ${if (hasCustomMinutes) "(Custom)" else "(Default)"} • Reels: ${currentAppLimitReels} ${if (hasCustomReels) "(Custom)" else "(Default)"}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (hasCustomMinutes || hasCustomReels) CoralPrimary else GreenSuccess
+                                    )
+                                } else {
+                                    Text(
+                                        text = "Excluded from monitoring",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color.Gray
+                                    )
+                                }
                             }
                         }
 
@@ -222,7 +253,10 @@ fun AppLimitsScreen() {
                             Switch(
                                 checked = isGuarded,
                                 onCheckedChange = { toggleAppGuarded(item.packageName, it) },
-                                colors = SwitchDefaults.colors(checkedThumbColor = CoralPrimary)
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = CoralPrimary,
+                                    checkedTrackColor = CoralPrimary.copy(alpha = 0.5f)
+                                )
                             )
 
                             IconButton(onClick = {
@@ -236,29 +270,80 @@ fun AppLimitsScreen() {
                         }
                     }
 
-                    // Expandable Per-App Limit Sliders (Phase 3)
+                    // Expandable Per-App Limit Sliders
                     if (isExpanded) {
                         Spacer(modifier = Modifier.height(14.dp))
                         HorizontalDivider(color = Color.DarkGray)
                         Spacer(modifier = Modifier.height(14.dp))
 
-                        Text(
-                            text = "Custom Screen Time: $currentAppLimit mins",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium
-                        )
+                        // Custom Screen Time Slider
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Screen Time: $currentAppLimitMins mins ${if (hasCustomMinutes) "(Custom Override)" else "(Global Default)"}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                            if (hasCustomMinutes) {
+                                TextButton(
+                                    onClick = { app.prefsRepository.removeCustomAppLimitMinutes(item.packageName) },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text("Reset to Default", fontSize = 12.sp, color = CoralPrimary)
+                                }
+                            }
+                        }
                         Slider(
-                            value = currentAppLimit.toFloat(),
+                            value = currentAppLimitMins.toFloat(),
                             onValueChange = {
                                 app.prefsRepository.setAppDailyLimitMinutes(item.packageName, it.toInt())
                             },
-                            valueRange = 5f..120f,
-                            steps = 22,
+                            valueRange = 5f..180f,
+                            steps = 34,
+                            colors = SliderDefaults.colors(thumbColor = CoralPrimary, activeTrackColor = CoralPrimary)
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Custom Reel Limit Slider
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Short Video Quota: $currentAppLimitReels reels ${if (hasCustomReels) "(Custom Override)" else "(Global Default)"}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                            if (hasCustomReels) {
+                                TextButton(
+                                    onClick = { app.prefsRepository.removeCustomAppReelLimit(item.packageName) },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text("Reset to Default", fontSize = 12.sp, color = CoralPrimary)
+                                }
+                            }
+                        }
+                        Slider(
+                            value = currentAppLimitReels.toFloat(),
+                            onValueChange = {
+                                app.prefsRepository.setAppDailyReelLimit(item.packageName, it.toInt())
+                            },
+                            valueRange = 5f..150f,
+                            steps = 28,
                             colors = SliderDefaults.colors(thumbColor = CoralPrimary, activeTrackColor = CoralPrimary)
                         )
                     }
                 }
             }
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }

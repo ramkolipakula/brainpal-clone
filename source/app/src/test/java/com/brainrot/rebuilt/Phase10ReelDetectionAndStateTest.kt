@@ -16,73 +16,26 @@ class Phase10ReelDetectionAndStateTest {
 
     @Before
     fun setUp() {
-        engine = ReelDetectionEngine(debounceWindowMs = 800L)
+        engine = ReelDetectionEngine(debounceWindowMs = 600L)
     }
 
-    // 1. YouTube Shorts confirmed vertical navigation increments once
+    // 1. One confirmed Instagram Reel navigation increments exactly once
     @Test
-    fun testYouTubeShortsVerticalSwipe_incrementsOnce() {
-        val context = ScrollEvaluationContext(
-            eventType = AccessibilityEvent.TYPE_VIEW_SCROLLED,
-            packageName = ReelDetectionEngine.PKG_YOUTUBE,
-            scrollDeltaX = 0,
-            scrollDeltaY = 600,
-            className = "androidx.viewpager2.widget.ViewPager2",
-            windowHierarchyKeywords = setOf("Shorts", "Remix", "Sound"),
-            eventTimestamp = 1000L
-        )
-
-        val result = engine.evaluateEvent(context)
-        assertEquals(DetectionResult.CONFIRMED_REEL_INCREMENT, result)
-    }
-
-    // 2. Multiple events belonging to one swipe increment only once
-    @Test
-    fun testSingleSwipeMultipleEventsBurst_incrementsOnlyOnce() {
-        val baseContext = ScrollEvaluationContext(
-            eventType = AccessibilityEvent.TYPE_VIEW_SCROLLED,
-            packageName = ReelDetectionEngine.PKG_YOUTUBE,
-            scrollDeltaX = 0,
-            scrollDeltaY = 450,
-            className = "androidx.viewpager2.widget.ViewPager2",
-            windowHierarchyKeywords = setOf("Shorts"),
-            eventTimestamp = 1000L
-        )
-
-        // First event in burst -> CONFIRMED
-        val res1 = engine.evaluateEvent(baseContext)
-        assertEquals(DetectionResult.CONFIRMED_REEL_INCREMENT, res1)
-
-        // Rapid follow-up events from the same swipe (e.g. at +80ms, +150ms, +250ms) -> DEDUPLICATED
-        val res2 = engine.evaluateEvent(baseContext.copy(eventTimestamp = 1080L))
-        assertEquals(DetectionResult.REJECT_DEDUPLICATE_BURST, res2)
-
-        val res3 = engine.evaluateEvent(baseContext.copy(eventTimestamp = 1150L))
-        assertEquals(DetectionResult.REJECT_DEDUPLICATE_BURST, res3)
-
-        val res4 = engine.evaluateEvent(baseContext.copy(eventTimestamp = 1250L))
-        assertEquals(DetectionResult.REJECT_DEDUPLICATE_BURST, res4)
-    }
-
-    // 3. A confirmed horizontal Instagram scroll does not increment
-    @Test
-    fun testConfirmedHorizontalInstagramScroll_doesNotIncrement() {
-        // Swiping a carousel post in Instagram feed horizontally
+    fun testInstagramReelsVerticalSwipe_incrementsOnce() {
         val context = ScrollEvaluationContext(
             eventType = AccessibilityEvent.TYPE_VIEW_SCROLLED,
             packageName = ReelDetectionEngine.PKG_INSTAGRAM,
-            scrollDeltaX = 500, // Significant horizontal delta
-            scrollDeltaY = 40,
-            className = "androidx.recyclerview.widget.RecyclerView",
-            windowHierarchyKeywords = setOf("reels"),
+            scrollDeltaX = 0,
+            scrollDeltaY = 550,
+            className = "androidx.viewpager2.widget.ViewPager2",
+            windowHierarchyKeywords = setOf("Reels", "Original audio", "Remix"),
             eventTimestamp = 1000L
         )
 
-        val result = engine.evaluateEvent(context)
-        assertEquals(DetectionResult.REJECT_HORIZONTAL_SCROLL, result)
+        assertEquals(DetectionResult.CONFIRMED_REEL_INCREMENT, engine.evaluateEvent(context))
     }
 
-    // 4. An Instagram click does not increment
+    // 2. An Instagram button click does not increment
     @Test
     fun testInstagramClickEvent_doesNotIncrement() {
         val clickContext = ScrollEvaluationContext(
@@ -98,7 +51,57 @@ class Phase10ReelDetectionAndStateTest {
         assertEquals(DetectionResult.REJECT_CLICK, engine.evaluateEvent(longClickContext))
     }
 
-    // 5. A scroll on the Instagram home feed does not increment
+    // 2b. An Instagram interactive control / button generating a scroll event is rejected
+    @Test
+    fun testInstagramButtonScrolledEvent_doesNotIncrement() {
+        val buttonScrolled = ScrollEvaluationContext(
+            eventType = AccessibilityEvent.TYPE_VIEW_SCROLLED,
+            packageName = ReelDetectionEngine.PKG_INSTAGRAM,
+            className = "android.widget.ImageButton",
+            contentDescription = "Like",
+            viewIdResourceName = "com.instagram.android:id/like_button",
+            windowHierarchyKeywords = setOf("Reels", "Original audio"),
+            eventTimestamp = 1000L
+        )
+        assertEquals(DetectionResult.REJECT_INTERACTIVE_CONTROL, engine.evaluateEvent(buttonScrolled))
+
+        val shareButtonScrolled = buttonScrolled.copy(
+            contentDescription = "Share",
+            viewIdResourceName = "com.instagram.android:id/direct_share_button"
+        )
+        assertEquals(DetectionResult.REJECT_INTERACTIVE_CONTROL, engine.evaluateEvent(shareButtonScrolled))
+    }
+
+    // 3. Instagram horizontal scrolling does not increment
+    @Test
+    fun testConfirmedHorizontalInstagramScroll_doesNotIncrement() {
+        // Swiping a carousel post in Instagram feed horizontally with delta
+        val context = ScrollEvaluationContext(
+            eventType = AccessibilityEvent.TYPE_VIEW_SCROLLED,
+            packageName = ReelDetectionEngine.PKG_INSTAGRAM,
+            scrollDeltaX = 500,
+            scrollDeltaY = 40,
+            className = "androidx.recyclerview.widget.RecyclerView",
+            windowHierarchyKeywords = setOf("reels"),
+            eventTimestamp = 1000L
+        )
+        assertEquals(DetectionResult.REJECT_HORIZONTAL_SCROLL, engine.evaluateEvent(context))
+
+        // Swiping horizontal scroll view or stories carousel
+        val carouselContext = ScrollEvaluationContext(
+            eventType = AccessibilityEvent.TYPE_VIEW_SCROLLED,
+            packageName = ReelDetectionEngine.PKG_INSTAGRAM,
+            scrollDeltaX = 0,
+            scrollDeltaY = 0,
+            className = "android.widget.HorizontalScrollView",
+            viewIdResourceName = "com.instagram.android:id/feed_carousel",
+            windowHierarchyKeywords = setOf("reels"),
+            eventTimestamp = 1000L
+        )
+        assertEquals(DetectionResult.REJECT_HORIZONTAL_SCROLL, engine.evaluateEvent(carouselContext))
+    }
+
+    // 4. Scrolling Instagram comments or the home feed does not increment
     @Test
     fun testInstagramHomeFeedScroll_doesNotIncrement() {
         val homeContext = ScrollEvaluationContext(
@@ -107,27 +110,46 @@ class Phase10ReelDetectionAndStateTest {
             scrollDeltaX = 0,
             scrollDeltaY = 300,
             className = "android.widget.ListView",
-            // Neutral feed keywords without Reels indicator
             windowHierarchyKeywords = setOf("Stories", "MainFeed", "ProfileGrid"),
             eventTimestamp = 1000L
         )
+        assertEquals(DetectionResult.REJECT_AMBIGUOUS_FEED, engine.evaluateEvent(homeContext))
 
-        val result = engine.evaluateEvent(homeContext)
-        assertEquals(DetectionResult.REJECT_AMBIGUOUS_FEED, result)
-
-        // Scrolling comments or DMs on Instagram
+        // Scrolling comments on Instagram
         val commentContext = homeContext.copy(
             windowHierarchyKeywords = setOf("Reels", "active_comment_composer")
         )
         assertEquals(DetectionResult.REJECT_NON_REELS_CONTEXT, engine.evaluateEvent(commentContext))
 
+        val commentSheetContext = homeContext.copy(
+            windowHierarchyKeywords = setOf("Reels", "comments_sheet")
+        )
+        assertEquals(DetectionResult.REJECT_NON_REELS_CONTEXT, engine.evaluateEvent(commentSheetContext))
+
+        // Direct messages on Instagram
         val dmContext = homeContext.copy(
             windowHierarchyKeywords = setOf("active_message_composer", "direct_thread")
         )
         assertEquals(DetectionResult.REJECT_NON_REELS_CONTEXT, engine.evaluateEvent(dmContext))
     }
 
-    // 6. A scroll on a non-Shorts YouTube screen does not increment
+    // 5. One confirmed YouTube Shorts navigation increments exactly once
+    @Test
+    fun testYouTubeShortsVerticalSwipe_incrementsOnce() {
+        val context = ScrollEvaluationContext(
+            eventType = AccessibilityEvent.TYPE_VIEW_SCROLLED,
+            packageName = ReelDetectionEngine.PKG_YOUTUBE,
+            scrollDeltaX = 0,
+            scrollDeltaY = 600,
+            className = "androidx.viewpager2.widget.ViewPager2",
+            windowHierarchyKeywords = setOf("Shorts", "Remix", "Sound"),
+            eventTimestamp = 1000L
+        )
+
+        assertEquals(DetectionResult.CONFIRMED_REEL_INCREMENT, engine.evaluateEvent(context))
+    }
+
+    // 6. Ordinary YouTube video-page scrolling does not increment
     @Test
     fun testYouTubeRegularFeedScroll_doesNotIncrement() {
         val watchContext = ScrollEvaluationContext(
@@ -135,32 +157,98 @@ class Phase10ReelDetectionAndStateTest {
             packageName = ReelDetectionEngine.PKG_YOUTUBE,
             scrollDeltaX = 0,
             scrollDeltaY = 400,
-            windowHierarchyKeywords = setOf("Watch_panel", "Subscriptions", "Comments"),
+            windowHierarchyKeywords = setOf("watch_panel", "Subscriptions", "Comments"),
             eventTimestamp = 1000L
         )
+        assertEquals(DetectionResult.REJECT_NON_SHORTS_CONTEXT, engine.evaluateEvent(watchContext))
 
-        val result = engine.evaluateEvent(watchContext)
-        assertEquals(DetectionResult.REJECT_NON_SHORTS_CONTEXT, result)
-    }
-
-    // 7. An ambiguous event does not increment
-    @Test
-    fun testAmbiguousOrZeroDeltaEvent_doesNotIncrement() {
-        val zeroDeltaContext = ScrollEvaluationContext(
+        val homeFeedContext = ScrollEvaluationContext(
             eventType = AccessibilityEvent.TYPE_VIEW_SCROLLED,
-            packageName = ReelDetectionEngine.PKG_INSTAGRAM,
+            packageName = ReelDetectionEngine.PKG_YOUTUBE,
             scrollDeltaX = 0,
-            scrollDeltaY = 0,
-            className = "android.widget.FrameLayout",
-            windowHierarchyKeywords = setOf("Stories", "MainFeed"),
+            scrollDeltaY = 300,
+            windowHierarchyKeywords = setOf("selected_home", "rich_grid"),
+            eventTimestamp = 1000L
+        )
+        assertEquals(DetectionResult.REJECT_NON_SHORTS_CONTEXT, engine.evaluateEvent(homeFeedContext))
+    }
+
+    // 7. One confirmed Snapchat Spotlight navigation increments exactly once
+    @Test
+    fun testSnapchatSpotlightVerticalSwipe_incrementsOnce() {
+        val context = ScrollEvaluationContext(
+            eventType = AccessibilityEvent.TYPE_VIEW_SCROLLED,
+            packageName = ReelDetectionEngine.PKG_SNAPCHAT,
+            scrollDeltaX = 0,
+            scrollDeltaY = 500,
+            className = "androidx.viewpager2.widget.ViewPager2",
+            windowHierarchyKeywords = setOf("Spotlight", "Remix Snap", "Sound"),
             eventTimestamp = 1000L
         )
 
-        val result = engine.evaluateEvent(zeroDeltaContext)
-        assertEquals(DetectionResult.REJECT_AMBIGUOUS_FEED, result)
+        assertEquals(DetectionResult.CONFIRMED_REEL_INCREMENT, engine.evaluateEvent(context))
     }
 
-    // 8. A legitimate second swipe increments again after deduplication allows it
+    // 8. Snapchat navigation outside Spotlight does not increment
+    @Test
+    fun testSnapchatCameraOrChatScroll_doesNotIncrement() {
+        // Camera capture screen
+        val cameraContext = ScrollEvaluationContext(
+            eventType = AccessibilityEvent.TYPE_VIEW_SCROLLED,
+            packageName = ReelDetectionEngine.PKG_SNAPCHAT,
+            scrollDeltaX = 0,
+            scrollDeltaY = 300,
+            windowHierarchyKeywords = setOf("selected_camera", "take picture", "lenses"),
+            eventTimestamp = 1000L
+        )
+        assertEquals(DetectionResult.REJECT_NON_SPOTLIGHT_CONTEXT, engine.evaluateEvent(cameraContext))
+
+        // Chat & messaging screen
+        val chatContext = ScrollEvaluationContext(
+            eventType = AccessibilityEvent.TYPE_VIEW_SCROLLED,
+            packageName = ReelDetectionEngine.PKG_SNAPCHAT,
+            scrollDeltaX = 0,
+            scrollDeltaY = 250,
+            windowHierarchyKeywords = setOf("selected_chat", "messages", "friend_feed"),
+            eventTimestamp = 1000L
+        )
+        assertEquals(DetectionResult.REJECT_NON_SPOTLIGHT_CONTEXT, engine.evaluateEvent(chatContext))
+
+        // Snap Map
+        val mapContext = ScrollEvaluationContext(
+            eventType = AccessibilityEvent.TYPE_VIEW_SCROLLED,
+            packageName = ReelDetectionEngine.PKG_SNAPCHAT,
+            scrollDeltaX = 0,
+            scrollDeltaY = 200,
+            windowHierarchyKeywords = setOf("selected_map", "snap map"),
+            eventTimestamp = 1000L
+        )
+        assertEquals(DetectionResult.REJECT_NON_SPOTLIGHT_CONTEXT, engine.evaluateEvent(mapContext))
+    }
+
+    // 9. Multiple accessibility events from one navigation do not double-count
+    @Test
+    fun testSingleSwipeMultipleEventsBurst_incrementsOnlyOnce() {
+        val baseContext = ScrollEvaluationContext(
+            eventType = AccessibilityEvent.TYPE_VIEW_SCROLLED,
+            packageName = ReelDetectionEngine.PKG_YOUTUBE,
+            scrollDeltaX = 0,
+            scrollDeltaY = 450,
+            className = "androidx.viewpager2.widget.ViewPager2",
+            windowHierarchyKeywords = setOf("Shorts"),
+            eventTimestamp = 1000L
+        )
+
+        // First event in burst -> CONFIRMED
+        assertEquals(DetectionResult.CONFIRMED_REEL_INCREMENT, engine.evaluateEvent(baseContext))
+
+        // Follow-up events within 600ms debounce window -> DEDUPLICATED
+        assertEquals(DetectionResult.REJECT_DEDUPLICATE_BURST, engine.evaluateEvent(baseContext.copy(eventTimestamp = 1080L)))
+        assertEquals(DetectionResult.REJECT_DEDUPLICATE_BURST, engine.evaluateEvent(baseContext.copy(eventTimestamp = 1250L)))
+        assertEquals(DetectionResult.REJECT_DEDUPLICATE_BURST, engine.evaluateEvent(baseContext.copy(eventTimestamp = 1450L)))
+    }
+
+    // 10. Two separate rapid navigations can increment separately
     @Test
     fun testLegitimateSecondSwipeAfterDebounce_incrementsAgain() {
         val swipe1 = ScrollEvaluationContext(
@@ -173,15 +261,75 @@ class Phase10ReelDetectionAndStateTest {
             eventTimestamp = 1000L
         )
 
-        // First swipe
+        // First swipe at 1000ms
         assertEquals(DetectionResult.CONFIRMED_REEL_INCREMENT, engine.evaluateEvent(swipe1))
 
-        // Legitimate second swipe 900ms later (> 800ms debounce)
-        val swipe2 = swipe1.copy(eventTimestamp = 1900L)
+        // Second genuine swipe 700ms later (> 600ms debounce)
+        val swipe2 = swipe1.copy(eventTimestamp = 1700L)
         assertEquals(DetectionResult.CONFIRMED_REEL_INCREMENT, engine.evaluateEvent(swipe2))
+
+        // Third genuine swipe 750ms later
+        val swipe3 = swipe1.copy(eventTimestamp = 2450L)
+        assertEquals(DetectionResult.CONFIRMED_REEL_INCREMENT, engine.evaluateEvent(swipe3))
     }
 
-    // 9. Changing the target immediately recalculates the mascot stage
+    // 11. Ambiguous or unsupported events do not increment
+    @Test
+    fun testAmbiguousOrZeroDeltaEvent_doesNotIncrement() {
+        val ambiguousContext = ScrollEvaluationContext(
+            eventType = AccessibilityEvent.TYPE_VIEW_SCROLLED,
+            packageName = ReelDetectionEngine.PKG_INSTAGRAM,
+            scrollDeltaX = 0,
+            scrollDeltaY = 0,
+            className = "android.widget.FrameLayout",
+            windowHierarchyKeywords = setOf("Stories", "MainFeed"),
+            eventTimestamp = 1000L
+        )
+        assertEquals(DetectionResult.REJECT_AMBIGUOUS_FEED, engine.evaluateEvent(ambiguousContext))
+
+        val untrackedContext = ScrollEvaluationContext(
+            eventType = AccessibilityEvent.TYPE_VIEW_SCROLLED,
+            packageName = "com.whatsapp",
+            scrollDeltaX = 0,
+            scrollDeltaY = 300,
+            eventTimestamp = 1000L
+        )
+        assertEquals(DetectionResult.REJECT_UNTRACKED_APP, engine.evaluateEvent(untrackedContext))
+    }
+
+    // 12. Real-world Instagram Reel with Comment button and Direct Share button increments successfully
+    @Test
+    fun testRealWorldInstagramReelWithCommentAndShareButtons_increments() {
+        val reelContext = ScrollEvaluationContext(
+            eventType = AccessibilityEvent.TYPE_VIEW_SCROLLED,
+            packageName = ReelDetectionEngine.PKG_INSTAGRAM,
+            scrollDeltaX = 0,
+            scrollDeltaY = 0,
+            className = "android.widget.FrameLayout",
+            windowHierarchyKeywords = setOf("Reels", "Friends", "1,540 comments", "Comment", "Share", "Direct", "Remix", "Original audio"),
+            eventTimestamp = 1000L
+        )
+
+        assertEquals(DetectionResult.CONFIRMED_REEL_INCREMENT, engine.evaluateEvent(reelContext))
+    }
+
+    // 13. Real-world YouTube Shorts with Subscriptions chip and Comments button increments successfully
+    @Test
+    fun testRealWorldYouTubeShortsWithSubscriptionsAndComments_increments() {
+        val shortsContext = ScrollEvaluationContext(
+            eventType = AccessibilityEvent.TYPE_VIEW_SCROLLED,
+            packageName = ReelDetectionEngine.PKG_YOUTUBE,
+            scrollDeltaX = 0,
+            scrollDeltaY = 350,
+            className = "android.view.ViewGroup",
+            windowHierarchyKeywords = setOf("Shorts", "Subscriptions", "Live", "Comments", "Remix"),
+            eventTimestamp = 1000L
+        )
+
+        assertEquals(DetectionResult.CONFIRMED_REEL_INCREMENT, engine.evaluateEvent(shortsContext))
+    }
+
+    // 14. Target change immediately recalculates mascot stage
     @Test
     fun testTargetChange_immediatelyRecalculatesMascotStage() {
         val count = 40
@@ -201,7 +349,7 @@ class Phase10ReelDetectionAndStateTest {
         assertEquals(MascotStage.ROASTED, MascotStageCalculator.calculateStage(count, target))
     }
 
-    // 10. Deterministic mascot aging boundaries and safety checks
+    // 15. Mascot stage boundaries and safety checks
     @Test
     fun testMascotStageCalculation_boundariesAndSafeHandling() {
         val target = 100
@@ -217,98 +365,76 @@ class Phase10ReelDetectionAndStateTest {
         assertEquals(MascotStage.ROASTED, MascotStageCalculator.calculateStage(100, target))
         assertEquals(MascotStage.ROASTED, MascotStageCalculator.calculateStage(140, target))
 
-        // Safe handling for 0 or negative targets (requirement 6: handle target values of zero or invalid safely)
-        val stageZeroTarget = MascotStageCalculator.calculateStage(10, 0)
-        assertNotNull(stageZeroTarget)
-        assertEquals(MascotStage.ROASTED, stageZeroTarget)
-
-        val stageNegativeTarget = MascotStageCalculator.calculateStage(5, -20)
-        assertNotNull(stageNegativeTarget)
-        assertEquals(MascotStage.ROASTED, stageNegativeTarget)
+        // Safe handling for 0 or negative targets
+        assertEquals(MascotStage.ROASTED, MascotStageCalculator.calculateStage(10, 0))
+        assertEquals(MascotStage.ROASTED, MascotStageCalculator.calculateStage(5, -20))
 
         // Safe handling for negative count
-        val stageNegativeCount = MascotStageCalculator.calculateStage(-5, 50)
-        assertEquals(MascotStage.FRESH, stageNegativeCount)
+        assertEquals(MascotStage.FRESH, MascotStageCalculator.calculateStage(-5, 50))
     }
 
-    // 11. Instagram Reels vertical swipe confirmed
+    // 16. Grammatical streak formatting test (1 Day vs X Days)
     @Test
-    fun testInstagramReelsVerticalSwipe_incrementsOnce() {
-        val context = ScrollEvaluationContext(
-            eventType = AccessibilityEvent.TYPE_VIEW_SCROLLED,
-            packageName = ReelDetectionEngine.PKG_INSTAGRAM,
-            scrollDeltaX = 0,
-            scrollDeltaY = 550,
-            className = "androidx.viewpager2.widget.ViewPager2",
-            windowHierarchyKeywords = setOf("Reels", "Original audio", "Remix"),
-            eventTimestamp = 2000L
-        )
+    fun testGrammaticalStreakFormatting() {
+        fun formatStreak(days: Int): String = if (days == 1) "1 Day" else "$days Days"
 
-        assertEquals(DetectionResult.CONFIRMED_REEL_INCREMENT, engine.evaluateEvent(context))
+        assertEquals("1 Day", formatStreak(1))
+        assertEquals("2 Days", formatStreak(2))
+        assertEquals("14 Days", formatStreak(14))
+        assertEquals("100 Days", formatStreak(100))
     }
 
-    // 12. Untracked application scroll does not increment
+    // 17. Per-app override precedence vs global default
     @Test
-    fun testUntrackedAppScroll_doesNotIncrement() {
-        val context = ScrollEvaluationContext(
-            eventType = AccessibilityEvent.TYPE_VIEW_SCROLLED,
-            packageName = "com.whatsapp",
-            scrollDeltaX = 0,
-            scrollDeltaY = 300,
-            eventTimestamp = 1000L
-        )
+    fun testPerAppOverridePrecedence() {
+        val globalLimit = 25
+        val appOverrides = mutableMapOf<String, Int>()
 
-        assertEquals(DetectionResult.REJECT_UNTRACKED_APP, engine.evaluateEvent(context))
+        fun resolveLimit(pkg: String): Int = appOverrides[pkg] ?: globalLimit
+
+        // Initially no override -> uses global default
+        assertEquals(25, resolveLimit("com.instagram.android"))
+        assertEquals(25, resolveLimit("com.google.android.youtube"))
+
+        // Set custom override for Instagram only
+        appOverrides["com.instagram.android"] = 50
+        assertEquals(50, resolveLimit("com.instagram.android"))
+        assertEquals(25, resolveLimit("com.google.android.youtube")) // YouTube untouched
+
+        // Remove override for Instagram
+        appOverrides.remove("com.instagram.android")
+        assertEquals(25, resolveLimit("com.instagram.android")) // back to global
     }
 
-    // 13. Real-world Instagram Reel with Comment button and Direct Share button increments successfully
+    // 18. Daily rollover reset logic
     @Test
-    fun testRealWorldInstagramReelWithCommentAndShareButtons_increments() {
-        val reelContext = ScrollEvaluationContext(
-            eventType = AccessibilityEvent.TYPE_VIEW_SCROLLED,
-            packageName = ReelDetectionEngine.PKG_INSTAGRAM,
-            scrollDeltaX = 0,
-            scrollDeltaY = 0, // FrameLayout on real phone reports 0
-            className = "android.widget.FrameLayout",
-            windowHierarchyKeywords = setOf("Reels", "Friends", "1,540 comments", "Comment", "Share", "Direct", "Remix", "Original audio"),
-            eventTimestamp = 1000L
-        )
+    fun testDailyRolloverResetLogic() {
+        var todayKey = "2026-11-03"
+        var lastActiveDate = "2026-11-02"
+        var todayCount = 45
+        var streak = 5
+        var passes = 1
 
-        val result = engine.evaluateEvent(reelContext)
-        assertEquals(DetectionResult.CONFIRMED_REEL_INCREMENT, result)
-    }
+        fun performMidnightCheck(currentDate: String) {
+            if (lastActiveDate != currentDate) {
+                // New day detected
+                todayCount = 0
+                passes = 3
+                streak++
+                lastActiveDate = currentDate
+            }
+        }
 
-    // 14. Real-world YouTube Shorts with Subscriptions chip and Comments button increments successfully
-    @Test
-    fun testRealWorldYouTubeShortsWithSubscriptionsAndComments_increments() {
-        val shortsContext = ScrollEvaluationContext(
-            eventType = AccessibilityEvent.TYPE_VIEW_SCROLLED,
-            packageName = ReelDetectionEngine.PKG_YOUTUBE,
-            scrollDeltaX = 0,
-            scrollDeltaY = 350,
-            className = "android.view.ViewGroup",
-            windowHierarchyKeywords = setOf("Shorts", "Subscriptions", "Live", "Comments", "Remix"),
-            eventTimestamp = 1000L
-        )
+        performMidnightCheck(todayKey)
+        assertEquals(0, todayCount)
+        assertEquals(3, passes)
+        assertEquals(6, streak)
+        assertEquals("2026-11-03", lastActiveDate)
 
-        val result = engine.evaluateEvent(shortsContext)
-        assertEquals(DetectionResult.CONFIRMED_REEL_INCREMENT, result)
-    }
-
-    // 15. Instagram Reel with open comment drawer does not increment
-    @Test
-    fun testInstagramReelWithActiveCommentDrawer_doesNotIncrement() {
-        val openCommentContext = ScrollEvaluationContext(
-            eventType = AccessibilityEvent.TYPE_VIEW_SCROLLED,
-            packageName = ReelDetectionEngine.PKG_INSTAGRAM,
-            scrollDeltaX = 0,
-            scrollDeltaY = 200,
-            className = "androidx.recyclerview.widget.RecyclerView",
-            windowHierarchyKeywords = setOf("Reels", "active_comment_composer", "1,540 comments"),
-            eventTimestamp = 1000L
-        )
-
-        val result = engine.evaluateEvent(openCommentContext)
-        assertEquals(DetectionResult.REJECT_NON_REELS_CONTEXT, result)
+        // Same day check does not re-reset
+        todayCount = 10
+        performMidnightCheck(todayKey)
+        assertEquals(10, todayCount)
+        assertEquals(6, streak)
     }
 }

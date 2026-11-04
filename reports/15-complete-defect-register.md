@@ -16,7 +16,7 @@
 | **HIGH** | 7 | Analytics mocks, missing UI bypass actions, stale lifecycle state, missing midnight reset, app discovery | **100% RESOLVED** |
 | **MEDIUM** | 3 | Onboarding permission coverage, scroll gesture precision, per-app quota granularity | **100% RESOLVED** |
 | **LOW** | 2 | Pass count parity, Compose state mutation tracking | **100% RESOLVED** |
-| **TOTAL** | **19** | | **19 / 19 RESOLVED** |
+| **TOTAL** | **24** | | **24 / 24 RESOLVED** |
 
 ---
 
@@ -219,3 +219,78 @@
   3. Directional analysis accepts confirmed vertical scrolls without rejecting zero deltas on custom view pagers when feed context is verified.
   4. Added 3 comprehensive real-device parity tests (21/21 total unit tests passing).
 - **Status**: **RESOLVED & VERIFIED**
+
+---
+
+### DEF-20: Emergency Passes Card Narrow Button Squeezing & Settings Bottom Clipping
+- **Domain**: UI / Settings Layout
+- **Severity**: **HIGH**
+- **Location**: `source/app/src/main/java/com/brainrot/rebuilt/ui/screens/SettingsScreen.kt`
+- **Root Cause**: Inner text Row in `SettingsScreen.kt` lacked `Modifier.weight(1f)`. When string width expanded, the remaining space for the right-hand action button collapsed to < 15dp, forcing characters to wrap vertically onto individual lines ("R-e-p-l-e-n-i-s-h"). Additionally, `LazyColumn` lacked sufficient bottom content padding, causing the final card to be clipped by the bottom navigation bar.
+- **Resolution**:
+  1. Added `Modifier.weight(1f)` with `Column(modifier = Modifier.weight(1f, fill = false))` to the title/subtitle row.
+  2. Applied `Modifier.defaultMinSize(minWidth = 80.dp).wrapContentSize()` with `maxLines = 1` and `softWrap = false` to the button.
+  3. Added `contentPadding = PaddingValues(16.dp, 16.dp, 16.dp, 88.dp)` and bottom spacer to `LazyColumn`, guaranteeing full scrolling clearance above navigation.
+- **Status**: **RESOLVED & VERIFIED**
+
+---
+
+### DEF-21: Inconsistent Counter Targets & Ungrammatical Streak Labels
+- **Domain**: UI / State Consistency
+- **Severity**: **MEDIUM**
+- **Location**: `source/app/src/main/java/com/brainrot/rebuilt/ui/screens/HomeScreen.kt` & `ReelsAccessibilityService.kt`
+- **Root Cause**:
+  1. Floating pill and HomeScreen observed diverging target resolutions when per-app overrides fell back inconsistently.
+  2. Streak text used raw interpolation `"Day $streakDays"` rather than proper pluralized grammar (`"1 Day"` vs `"$streakDays Days"`).
+- **Resolution**:
+  1. Unified target resolution across `HomeScreen`, `SettingsScreen`, and `ReelsAccessibilityService` through synchronized `StateFlow`s (`todayReelCountFlow`, `dailyReelLimitFlow`, `perAppReelLimitsFlow`).
+  2. Formatted streak display with grammatical helper: `if (streakDays == 1) "1 Day" else "$streakDays Days"`.
+- **Status**: **RESOLVED & VERIFIED**
+
+---
+
+### DEF-22: Limits Screen Omission of Per-App Short Video Overrides & Ambiguous Default Scope
+- **Domain**: UI / Quotas & Limits
+- **Severity**: **MEDIUM**
+- **Location**: `source/app/src/main/java/com/brainrot/rebuilt/ui/screens/AppLimitsScreen.kt`
+- **Root Cause**: `AppLimitsScreen` only allowed configuring screen-time minutes, omitting per-app reel limit sliders even though `PreferencesRepository` supported them. The global card did not clearly state its scope.
+- **Resolution**:
+  1. Added dual sliders (Screen Time mins + Short Video reels) in expandable per-app cards.
+  2. Clearly labeled global defaults vs custom per-app overrides with instant "Reset to Default" actions.
+  3. Added unambiguous `Guarded` vs `Excluded` status chips with dedicated switch controls.
+- **Status**: **RESOLVED & VERIFIED**
+
+---
+
+### DEF-23: Analytics Screen Fabricated Formulas, Unhandled Missing Permission, and Interception Ambiguity
+- **Domain**: UI / Analytics
+- **Severity**: **HIGH**
+- **Location**: `source/app/src/main/java/com/brainrot/rebuilt/ui/screens/StatsScreen.kt` & `UsageStatsRepository.kt`
+- **Root Cause**:
+  1. Attention reclaimed was computed using an arbitrary non-defensible formula `(globalLimitMins * 1.5f - totalDistractedMins)`.
+  2. Tracked reels viewed were described as "Short Videos Intercepted" even when no block had occurred.
+  3. Missing usage permission rendered an empty chart without guidance.
+- **Resolution**:
+  1. Replaced fabricated formula with defensible daily budget accounting and active intervention tracking.
+  2. Separated "Short Videos Monitored" (all viewed reels) from "Interventions Triggered" (actual blocker events).
+  3. Added proactive permission request card with direct link to `Settings.ACTION_USAGE_ACCESS_SETTINGS`.
+  4. Fixed chart scaling and added readable minute indicators above active bars.
+- **Status**: **RESOLVED & VERIFIED**
+
+---
+
+### DEF-24: Reel Detection Engine Lacks Snapchat Spotlight & Rejection of Interactive Controls / Button Scrolls
+- **Domain**: Accessibility Service / Reel Detection
+- **Severity**: **CRITICAL**
+- **Location**: `source/app/src/main/java/com/brainrot/rebuilt/domain/ReelDetectionEngine.kt` & `ReelsAccessibilityService.kt`
+- **Root Cause**:
+  1. `ReelDetectionEngine` rejected Snapchat (`com.snapchat.android`) on package check as `REJECT_UNTRACKED_APP`.
+  2. Button clicks or interactive control scrolls (like, share, comment buttons, stickers) masqueraded as scroll events on custom views with zero deltas, incrementing the reel counter.
+  3. Scrolling inside open comments drawers was not filtered out.
+- **Resolution**:
+  1. Added dedicated detection path for `PKG_SNAPCHAT` (`com.snapchat.android`) verifying Spotlight feed indicators (`spotlight`, `spotlight_feed`, `spotlight_player`) while rejecting Camera (`selected_camera`), Chat (`selected_chat`), and Map screens.
+  2. Implemented `isInteractiveControl()` to detect and reject action buttons (`like`, `comment`, `share`, `remix`, `subscribe`) emitting scroll events.
+  3. Added detection of comment drawers (`comments_sheet`, `layout_comment_thread`) rejecting in-drawer scrolling.
+  4. Added automated tests covering all scenarios (25/25 tests passing).
+- **Status**: **RESOLVED & VERIFIED**
+
